@@ -96,7 +96,14 @@ func newGetCmd() *Cmd {
 
 	handler := func(cmd *Cmd) error {
 		if paperProjectVersion == "" {
-			return fmt.Errorf("-version is required")
+			versions, err := papertool.GetVersions(serverURL, paperProject)
+			if err != nil {
+				return err
+			}
+			if len(versions.Versions) == 0 {
+				return fmt.Errorf("no versions")
+			}
+			paperProjectVersion = versions.Versions[len(versions.Versions)-1]
 		}
 
 		builds, err := papertool.GetBuilds(serverURL, paperProject, paperProjectVersion)
@@ -190,7 +197,14 @@ func newDownloadCmd() *Cmd {
 
 	handler := func(cmd *Cmd) error {
 		if paperProjectVersion == "" {
-			return fmt.Errorf("-version is required")
+			versions, err := papertool.GetVersions(serverURL, paperProject)
+			if err != nil {
+				return err
+			}
+			if len(versions.Versions) == 0 {
+				return fmt.Errorf("no versions")
+			}
+			paperProjectVersion = versions.Versions[len(versions.Versions)-1]
 		}
 
 		builds, err := papertool.GetBuilds(serverURL, paperProject, paperProjectVersion)
