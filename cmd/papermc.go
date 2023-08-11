@@ -26,7 +26,7 @@ func main() {
 	flaggy.SetName(os.Args[0])
 	flaggy.SetDescription("Tool for interacting with the Jenkins API")
 	flaggy.DefaultParser.AdditionalHelpPrepend = "https://github.com/tadhunt/papertool"
-	flaggy.SetVersion("0.1")
+	flaggy.SetVersion(MainSemanticVersion)
 
 	server := ""
 	flaggy.String(&server, "", "server", "[required] URL of Jenkins server to interact with")
