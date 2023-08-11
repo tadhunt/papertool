@@ -117,17 +117,10 @@ func newGetCmd() *Cmd {
 		if currentBuildIndex < 0 {
 			return fmt.Errorf("-build: build '%s' not found", build)
 		}
-		finalBuildIndex := currentBuildIndex
 
-		if since != "" {
-			if since == "first" {
-				finalBuildIndex = 0
-			} else {
-				finalBuildIndex = builds.FindBuildIndex(since)
-				if finalBuildIndex < 0 {
-					return fmt.Errorf("-since: build '%s' not found", build)
-				}
-			}
+		finalBuildIndex := builds.FindBuildIndex(since)
+		if finalBuildIndex < 0 {
+			return fmt.Errorf("-since: build '%s' not found", build)
 		}
 
 		first := true

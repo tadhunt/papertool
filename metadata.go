@@ -258,6 +258,10 @@ func (builds *Builds) FindBuildIndex(build string) int {
 		return len(builds.Builds) - 1
 	}
 
+	if build == "first" {
+		return 0
+	}
+
 	for i, b := range builds.Builds {
 		if String(b.Build) == build {
 			return i
