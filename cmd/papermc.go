@@ -136,7 +136,7 @@ func newGetCmd() *Cmd {
 			fmt.Printf("Channel  %s\n", papertool.String(currentBuild.Channel))
 
 			if currentBuild.Artifact != nil && currentBuild.Artifact.Application != nil {
-				fmt.Printf("Artifact %s\n", papertool.String(currentBuild.Artifact.Application.Name))
+				fmt.Printf("Artifact %s sha256 %s\n", papertool.String(currentBuild.Artifact.Application.Name), papertool.String(currentBuild.Artifact.Application.Sha256))
 			}
 
 			if showChanges {

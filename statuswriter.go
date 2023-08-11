@@ -1,10 +1,13 @@
 package papertool
 
 import (
+	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 	"golang.org/x/text/number"
 	"os"
 	"time"
+	"hash"
+	"crypto/sha256"
 )
 
 const (
@@ -21,10 +24,25 @@ type StatusWriter struct {
 	start  time.Time
 	name   string
 	quiet  bool
+	sha256 hash.Hash
+}
+
+func NewStatusWriter(name string, quiet bool) *StatusWriter {
+	return &StatusWriter{
+		p:      message.NewPrinter(language.English),
+		format: number.NewFormat(number.Decimal, number.MaxFractionDigits(2), number.MinFractionDigits(2)),
+		last:   0,
+		total:  0,
+		start:  time.Now(),
+		name:   name,
+		quiet:  quiet,
+		sha256: sha256.New(),
+	}
 }
 
 func (sw *StatusWriter) Write(data []byte) (int, error) {
 	sw.total += int64(len(data))
+	sw.sha256.Write(data)
 
 	if !sw.quiet {
 		if sw.total-sw.last >= 256*1000 {
