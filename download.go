@@ -12,10 +12,12 @@ import (
 	"time"
 )
 
-func Download(serverURL *url.URL, project string, channel string, build string, artifact *Artifact, dstdir string, replace bool, quiet bool) error {
-	build = parseBuild(build)
+func Download(serverURL *url.URL, project string, version string, build string, artifact *Artifact, dstdir string, replace bool, quiet bool) error {
+	if artifact == nil || artifact.Application == nil || artifact.Application.Name == nil {
+		return fmt.Errorf("bad artifact")
+	}
 
-	src := fmt.Sprintf("%s/api/v2/projects/%s/versions/%s/builds/%s/downloads/%s", serverURL.String(), project, channel, build, String(artifact.Application.Name))
+	src := fmt.Sprintf("%s/api/v2/projects/%s/versions/%s/builds/%s/downloads/%s", serverURL.String(), project, version, build, String(artifact.Application.Name))
 	dst := fmt.Sprintf("%s/%s", dstdir, String(artifact.Application.Name))
 
 	_, err := os.Stat(dst)

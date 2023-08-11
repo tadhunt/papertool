@@ -38,8 +38,43 @@ import (
  */
 
 /*
- * Fetch build info for the given ${PROJECT} and ${CHANNEL}
- *	GET https://api.papermc.io/v2/projects/${PROJECT}/versions/${CHANNEL}/builds
+ * Fetch builds for the given ${PROJECT} and ${VERSION}
+ *	GET https://api.papermc.io/v2/projects/${PROJECT}/versions/${VERSION}/builds
+ *
+ * For example:
+ *	GET https://api.papermc.io/v2/projects/velocity/versions/3.2.0-SNAPSHOT/builds
+ *
+ * Response:
+ * {
+ *     "project_id": "velocity",
+ *     "project_name": "Velocity",
+ *     "version": "3.2.0-SNAPSHOT",
+ *     "builds": [
+ *         {
+ *             "build": 214,
+ *             "time": "2023-01-02T02:52:34.092Z",
+ *             "channel": "default",
+ *             "promoted": false,
+ *             "changes": [
+ *                 {
+ *                     "commit": "1bfeac58b6069a061326d3ced1940e3ccf5feb18",
+ *                     "summary": "all, not just sub",
+ *                     "message": "all, not just sub\n"
+ *                 }
+ *             ],
+ *             "downloads": {
+ *                 "application": {
+ *                     "name": "velocity-3.2.0-SNAPSHOT-214.jar",					<-- ARTIFACT
+ *                     "sha256": "1bf681f954bc4d68a3b395c1eb360a933500f8fd960679bf40e8d05af16e8483"
+ *                 }
+ *             }
+ *         },
+ * 	[...]
+ */
+
+/*
+ * Fetch a specific build for the given ${PROJECT} and ${VERSION}
+ *	GET https://api.papermc.io/v2/projects/${PROJECT}/versions/${VERSION}/builds/${BUILD}
  *
  * For example:
  *	GET https://api.papermc.io/v2/projects/velocity/versions/3.2.0-SNAPSHOT/builds
@@ -74,7 +109,7 @@ import (
 
 /*
  * Download a build artifact
- *	GET https://api.papermc.io/v2/projects/${PROJECT}/versions/${CHANNEL}/builds/${BUILD}/downloads/${ARTIFACT}
+ *	GET https://api.papermc.io/v2/projects/${PROJECT}/versions/${VERSION}/builds/${BUILD}/downloads/${ARTIFACT}
  *
  * For example:
  *	GET https://api.papermc.io/v2/projects/velocity/versions/3.2.0-SNAPSHOT/builds/261/downloads/velocity-3.2.0-SNAPSHOT-261.jar
@@ -89,27 +124,32 @@ const (
 	Project_Waterfall = "waterfall"
 )
 
-type Channels struct {
-	ID            *string  `json:"project_id"`
-	Name          *string  `json:"project_name"`
+type Versions struct {
+	ProjectID     *string  `json:"project_id"`
+	ProjectName   *string  `json:"project_name"`
 	VersionGroups []string `json:"version_groups"`
 	Versions      []string `json:"versions"`
+	raw           []byte
 }
 
 type Builds struct {
-	ID      *string  `json:"project_id"`
-	Name    *string  `json:"project_name"`
-	Version *string  `json:"version"`
-	Builds  []*Build `json:"builds"`
+	ProjectID   *string  `json:"project_id"`
+	ProjectName *string  `json:"project_name"`
+	Version     *string  `json:"version"`
+	Builds      []*Build `json:"builds"`
+	raw           []byte
 }
 
 type Build struct {
-	Build     *string     `json:"build"`
-	Time      *string     `json:"time"`
-	Channel   *string     `json:"channel"`
-	Promoted  *bool       `json:"promoted"`
-	Changes   []*Change   `json:"changes"`
-	Downloads []*Artifact `json:"downloads"`
+	ProjectID   *string     `json:"project_id"`
+	ProjectName *string     `json:"project_name"`
+	Build       *float64    `json:"build"`
+	Time        *string     `json:"time"`
+	Channel     *string     `json:"channel"`
+	Promoted    *bool       `json:"promoted"`
+	Changes     []*Change   `json:"changes"`
+	Artifact   *Artifact `json:"downloads"`
+	raw           []byte
 }
 
 type Change struct {
@@ -137,61 +177,59 @@ func (e *MetadataSyntaxError) Error() string {
 	return e.msg
 }
 
-func GetChannels(src *url.URL, project string) (channels *Channels, err error) {
-	u := fmt.Sprintf("%s/api/v2/projects/%s", src.String(), project)
+func GetVersions(src *url.URL, project string) (versions *Versions, err error) {
+	u := fmt.Sprintf("%s/v2/projects/%s", src.String(), project)
 
-	err = fetch(u, channels)
-	return
-}
-	
-func GetBuilds(src *url.URL, project string, channel string) (builds *Builds, err error) {
-	u := fmt.Sprintf("%s/api/v2/projects/%s/versions/%s/builds", src.String(), project, channel)
-	err = fetch(u, builds)
+	versions = &Versions{}
+	versions.raw, err = fetch(u, versions)
 	return
 }
 
-func GetBuild(src *url.URL, project string, channel string, build string) (b *Build, err error) {
-	u := fmt.Sprintf("%s/api/v2/projects/%s/versions/%s/builds/%s", src.String(), project, channel, build)
+func GetBuilds(src *url.URL, project string, version string) (builds *Builds, err error) {
+	u := fmt.Sprintf("%s/v2/projects/%s/versions/%s/builds", src.String(), project, version)
 
-	err = fetch(u, b)
+	builds = &Builds{}
+	builds.raw, err = fetch(u, builds)
+	if err != nil {
+		return
+	}
+
+	//
+	// these fields are populated when fetching a specific build, but not when fetching all builds
+	//
+	for _, build := range builds.Builds {
+		build.ProjectID = builds.ProjectID
+		build.ProjectName = builds.ProjectName
+	}
+
 	return
 }
 
-func GetRawBuildMetadata(src *url.URL, build string) ([]byte, error) {
-	build = parseBuild(build)
+func GetBuild(src *url.URL, project string, version string, build string) (b *Build, err error) {
+	u := fmt.Sprintf("%s/v2/projects/%s/versions/%s/builds/%s", src.String(), project, version, build)
 
-	u := fmt.Sprintf("%s/%s/api/json", src.String(), build)
+	b = &Build{}
+	b.raw, err = fetch(u, b)
+	return
+}
 
-	response, err := http.Get(u)
+func fetch(src string, result any) ([]byte, error) {
+	response, err := http.Get(src)
 	if err != nil {
 		return nil, err
 	}
 
 	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	err = unmarshal(body, result)
 	if err != nil {
 		return nil, err
 	}
 
 	return body, nil
-}
-
-func fetch(src string, result any) error {
-	response, err := http.Get(src)
-	if err != nil {
-		return err
-	}
-
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return err
-	}
-
-	err = unmarshal(body, result)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func unmarshal(raw []byte, dst any) error {
@@ -209,4 +247,34 @@ func unmarshal(raw []byte, dst any) error {
 	}
 
 	return nil
+}
+
+func (builds *Builds) FindBuildIndex(build string) int {
+	if len(builds.Builds) == 0 {
+		return -1
+	}
+
+	if build == "" {
+		return len(builds.Builds) - 1
+	}
+
+	for i, b := range builds.Builds {
+		if String(b.Build) == build {
+			return i
+		}
+	}
+
+	return -1
+}
+
+func (versions *Versions) Raw() []byte {
+	return versions.raw
+}
+
+func (builds *Builds) Raw() []byte {
+	return builds.raw
+}
+
+func (build *Build) Raw() []byte {
+	return build.raw
 }

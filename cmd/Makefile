@@ -3,4 +3,4 @@ all:
 	go build -o papermc
 
 install: all
-	cp jenkins ${HOME}/bin
+	cp papermc ${HOME}/bin

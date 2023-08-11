@@ -7,7 +7,6 @@ import (
 	"strings"
 	"net/url"
 	"os"
-	"regexp"
 )
 
 type Cmd struct {
@@ -18,6 +17,9 @@ type Cmd struct {
 var (
 	serverURL *url.URL
 	quiet     = false
+	paperProject   = ""
+	paperProjectVersion = ""
+
 )
 
 func main() {
@@ -27,8 +29,10 @@ func main() {
 	flaggy.SetVersion("0.1")
 
 	server := ""
-	flaggy.String(&server, "s", "server", "[required] URL of Jenkins server to interact with")
-	flaggy.Bool(&quiet, "q", "quiet", "[optional] don't print extra info")
+	flaggy.String(&server, "", "server", "[required] URL of Jenkins server to interact with")
+	flaggy.Bool(&quiet, "", "quiet", "[optional] don't print extra info")
+	flaggy.String(&paperProject, "", "project", "[required] Paper project to fetch data from")
+	flaggy.String(&paperProjectVersion, "", "project-version", "[optional] version of the project to fetch data from")
 
 	cmds := []*Cmd{
 		newGetCmd(),
@@ -46,6 +50,10 @@ func main() {
 		return
 	}
 
+	if paperProject == "" {
+		flaggy.DefaultParser.ShowHelpWithMessage("-project is required")
+	}
+
 	var err error
 	serverURL, err = url.Parse(server)
 	if err != nil {
@@ -57,7 +65,14 @@ func main() {
 		if cmd.cmd.Used {
 			err := cmd.handler(cmd)
 			if err != nil {
-				flaggy.DefaultParser.ShowHelpWithMessage(fmt.Sprintf("cmd %s: %v", cmd.cmd.Name, err))
+				serr, isSyntaxError := err.(*papertool.MetadataSyntaxError)
+				if isSyntaxError {
+					os.Stderr.WriteString(serr.Raw)
+					fmt.Fprintf(os.Stderr, "offset %v\n", serr.Offset)
+					flaggy.DefaultParser.ShowHelpWithMessage(fmt.Sprintf("cmd %s: %v", cmd.cmd.Name, err))
+				} else {
+					flaggy.DefaultParser.ShowHelpWithMessage(fmt.Sprintf("cmd %s: %v", cmd.cmd.Name, err))
+				}
 			}
 			return
 
@@ -70,73 +85,84 @@ func newGetCmd() *Cmd {
 	since := ""
 	showChanges := false
 	rawJson := false
-	pproject := ""
-	channel := ""
 
 	get := flaggy.NewSubcommand("get")
 	get.Description = "Get Build Metadata"
 
-	get.String(&pproject, "", "paper-project", "[required] Paper project to fetch data from")
-	get.String(&channel, "", "channel", "[required] Channel project to fetch data from")
 	get.String(&build, "", "build", "[optional] Build to fetch (defaults to latest)")
 	get.Bool(&showChanges, "", "changes", "[optional] show changes")
 	get.String(&since, "", "since", "[optional] Fetch all builds between the latest and this one")
 	get.Bool(&rawJson, "", "json", "[optional] dump the raw json metadata")
 
 	handler := func(cmd *Cmd) error {
-		if pproject == "" {
-			return fmt.Errorf("-paper-project is required"
+		if paperProjectVersion == "" {
+			return fmt.Errorf("-version is required")
 		}
-		if channel == "" {
-			return fmt.Errorf("-channel is required"
+
+		builds, err := papertool.GetBuilds(serverURL, paperProject, paperProjectVersion)
+		if err != nil {
+			return err
+		}
+
+		if rawJson {
+			os.Stdout.Write(builds.Raw())
+			return nil
+		}
+
+		if len(builds.Builds) == 0 {
+			return fmt.Errorf("no builds")
+		}
+
+		currentBuildIndex := builds.FindBuildIndex(build)
+		if currentBuildIndex < 0 {
+			return fmt.Errorf("-build: build '%s' not found", build)
+		}
+		finalBuildIndex := currentBuildIndex
+
+		if since != "" {
+			if since == "first" {
+				finalBuildIndex = 0
+			} else {
+				finalBuildIndex = builds.FindBuildIndex(since)
+				if finalBuildIndex < 0 {
+					return fmt.Errorf("-since: build '%s' not found", build)
+				}
+			}
 		}
 
 		first := true
-		var metadata *papertool.Build
 		for {
 			if !first {
 				fmt.Printf("----------\n")
 			}
 
-			var err error
-			metadata, err = papertool.GetBuild(serverURL, project, channel, build)
-			if err != nil {
-				return err
-			}
+			currentBuild := builds.Builds[currentBuildIndex]
 
-			fmt.Printf("Build    %s\n", build)
-			fmt.Printf("ID       %v\n", papertool.String(metadata.ID))
+			fmt.Printf("Build    %s\n", papertool.String(currentBuild.Build))
+			fmt.Printf("Time     %s\n", papertool.String(currentBuild.Time))
+			fmt.Printf("Channel  %s\n", papertool.String(currentBuild.Channel))
 
-			for _, artifact := range metadata.Artifacts {
-				fmt.Printf("Artifact %s\n", papertool.String(artifact.Application.Name))
+			if currentBuild.Artifact != nil && currentBuild.Artifact.Application != nil {
+				fmt.Printf("Artifact %s\n", papertool.String(currentBuild.Artifact.Application.Name))
 			}
 
 			if showChanges {
-				for _, change := range metadata.Changes {
+				for _, change := range currentBuild.Changes {
 					fmt.Printf("Change %s\n", papertool.String(change.Commit))
 					comment := cleanComment(papertool.String(change.Message))
 					os.Stdout.WriteString(comment)
 				}
 			}
 
-			if since == "" {
+			currentBuildIndex--
+			if currentBuildIndex < 0 {
 				break
 			}
 
-			if metadata.PreviousBuild == nil {
+			if currentBuildIndex < finalBuildIndex {
 				break
 			}
 
-			prevBuild := papertool.String(metadata.PreviousBuild.Number)
-			if prevBuild == "" {
-				break
-			}
-
-			if prevBuild == since {
-				break
-			}
-
-			build = prevBuild
 			first = false
 		}
 
@@ -159,26 +185,33 @@ func cleanComment(comment string) string {
 
 func newDownloadCmd() *Cmd {
 	build := ""
-	artifactFilter := ""
 	dstdir := ""
 	replace := false
 
 	get := flaggy.NewSubcommand("download")
 	get.Description = "download build artifact"
 
-	get.String(&build, "b", "build", "[optional] Build to fetch (defaults to latest)")
-	get.String(&artifactFilter, "a", "artifact", "[optional] regex specifying which artifacts to fetch (default all)")
-	get.String(&dstdir, "d", "dstdir", "[optional] Destination directory to download artifact(s) into")
-	get.Bool(&replace, "r", "replace", "[optional] replace artifacts if they already exist")
+	get.String(&build, "", "build", "[optional] Build to fetch (defaults to latest)")
+	get.String(&dstdir, "", "dstdir", "[optional] Destination directory to download artifact(s) into")
+	get.Bool(&replace, "", "replace", "[optional] replace artifacts if they already exist")
 
 	handler := func(cmd *Cmd) error {
-		if artifactFilter == "" {
-			artifactFilter = ".*"
+		if paperProjectVersion == "" {
+			return fmt.Errorf("-version is required")
 		}
 
-		artifactRe, err := regexp.Compile(artifactFilter)
+		builds, err := papertool.GetBuilds(serverURL, paperProject, paperProjectVersion)
 		if err != nil {
 			return err
+		}
+
+		if len(builds.Builds) == 0 {
+			return fmt.Errorf("no builds")
+		}
+
+		buildIndex := builds.FindBuildIndex(build)
+		if buildIndex < 0 {
+			return fmt.Errorf("-build: build '%s' not found", build)
 		}
 
 		if dstdir == "" {
@@ -193,18 +226,11 @@ func newDownloadCmd() *Cmd {
 			return fmt.Errorf("%s: is not a directory", dstdir)
 		}
 
-		metadata, err := papertool.GetBuildMetadata(serverURL, build)
+		b := builds.Builds[buildIndex]
+
+		err = papertool.Download(serverURL, paperProject, paperProjectVersion, build, b.Artifact, dstdir, replace, quiet)
 		if err != nil {
 			return err
-		}
-
-		for _, artifact := range metadata.Artifacts {
-			if artifactRe.MatchString(artifact.DisplayPath) {
-				err = papertool.Download(serverURL, build, artifact, dstdir, replace, quiet)
-				if err != nil {
-					return err
-				}
-			}
 		}
 
 		return nil
