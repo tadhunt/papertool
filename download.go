@@ -58,4 +58,3 @@ func Download(serverURL *url.URL, project string, version string, build string, 
 
 	return nil
 }
-

@@ -137,19 +137,19 @@ type Builds struct {
 	ProjectName *string  `json:"project_name"`
 	Version     *string  `json:"version"`
 	Builds      []*Build `json:"builds"`
-	raw           []byte
+	raw         []byte
 }
 
 type Build struct {
-	ProjectID   *string     `json:"project_id"`
-	ProjectName *string     `json:"project_name"`
-	Build       *float64    `json:"build"`
-	Time        *string     `json:"time"`
-	Channel     *string     `json:"channel"`
-	Promoted    *bool       `json:"promoted"`
-	Changes     []*Change   `json:"changes"`
-	Artifact   *Artifact `json:"downloads"`
-	raw           []byte
+	ProjectID   *string   `json:"project_id"`
+	ProjectName *string   `json:"project_name"`
+	Build       *float64  `json:"build"`
+	Time        *string   `json:"time"`
+	Channel     *string   `json:"channel"`
+	Promoted    *bool     `json:"promoted"`
+	Changes     []*Change `json:"changes"`
+	Artifact    *Artifact `json:"downloads"`
+	raw         []byte
 }
 
 type Change struct {

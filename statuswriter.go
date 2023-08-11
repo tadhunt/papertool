@@ -1,13 +1,13 @@
 package papertool
 
 import (
+	"crypto/sha256"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 	"golang.org/x/text/number"
+	"hash"
 	"os"
 	"time"
-	"hash"
-	"crypto/sha256"
 )
 
 const (
