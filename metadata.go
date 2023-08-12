@@ -277,7 +277,7 @@ func (builds *Builds) FindBuild(build string) *Build {
 		return nil
 	}
 
-	return build.Builds[i]
+	return builds.Builds[i]
 }
 
 func (versions *Versions) Raw() []byte {
