@@ -254,7 +254,7 @@ func (builds *Builds) FindBuildIndex(build string) int {
 		return -1
 	}
 
-	if build == "" {
+	if build == "" || build == "latest" {
 		return len(builds.Builds) - 1
 	}
 
@@ -269,6 +269,15 @@ func (builds *Builds) FindBuildIndex(build string) int {
 	}
 
 	return -1
+}
+
+func (builds *Builds) FindBuild(build string) *Build {
+	i := builds.FindBuildIndex(build)
+	if i < 0 {
+		return nil
+	}
+
+	return build.Builds[i]
 }
 
 func (versions *Versions) Raw() []byte {
