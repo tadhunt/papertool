@@ -24,12 +24,12 @@ var (
 
 func main() {
 	flaggy.SetName(os.Args[0])
-	flaggy.SetDescription("Tool for interacting with the Jenkins API")
+	flaggy.SetDescription("Tool for interacting with the papermc.io API")
 	flaggy.DefaultParser.AdditionalHelpPrepend = "https://github.com/tadhunt/papertool"
 	flaggy.SetVersion(MainSemanticVersion)
 
-	server := ""
-	flaggy.String(&server, "", "server", "[required] URL of Jenkins server to interact with")
+	server := "https://api.papermc.io"
+	flaggy.String(&server, "", "server", "[required] URL of papermc.io server to interact with")
 	flaggy.Bool(&quiet, "", "quiet", "[optional] don't print extra info")
 	flaggy.String(&paperProject, "", "project", "[required] Paper project to fetch data from")
 	flaggy.String(&paperProjectVersion, "", "project-version", "[optional] version of the project to fetch data from")
@@ -37,6 +37,7 @@ func main() {
 	cmds := []*Cmd{
 		newGetCmd(),
 		newDownloadCmd(),
+		newVersionsCmd(),
 	}
 
 	for _, cmd := range cmds {
@@ -244,4 +245,34 @@ func newDownloadCmd() *Cmd {
 	}
 
 	return &Cmd{cmd: get, handler: handler}
+}
+
+func newVersionsCmd() *Cmd {
+	rawJson := false
+
+	cmd := flaggy.NewSubcommand("versions")
+	cmd.Description = "Get Project Versions"
+
+	cmd.Bool(&rawJson, "", "json", "[optional] dump the raw json metadata")
+
+	handler := func(cmd *Cmd) error {
+		versions, err := papertool.GetVersions(serverURL, paperProject)
+		if err != nil {
+			return err
+		}
+
+		if rawJson {
+			os.Stdout.Write(versions.Raw())
+			return nil
+		}
+
+		fmt.Printf("ProjectID     %s\n", papertool.String(versions.ProjectID))
+		fmt.Printf("ProjectName   %s\n", papertool.String(versions.ProjectName))
+		fmt.Printf("VersionGroups %q\n", versions.VersionGroups)
+		fmt.Printf("Versions      %q\n", versions.Versions)
+
+		return nil
+	}
+
+	return &Cmd{cmd: cmd, handler: handler}
 }
