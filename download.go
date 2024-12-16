@@ -34,7 +34,9 @@ func Download(serverURL *url.URL, project string, version string, build string, 
 		}
 	}
 
-	sw := NewStatusWriter(dst, quiet)
+	msg := fmt.Sprintf("%s to %s", src, dst)
+
+	sw := NewStatusWriter(msg, quiet)
 
 	err = dlstream.DownloadStream(context.Background(), src, dst, sw)
 	if err != nil {
@@ -45,7 +47,7 @@ func Download(serverURL *url.URL, project string, version string, build string, 
 	kbps := float64(sw.total) / 1000.0 / elapsed.Seconds()
 
 	hash := fmt.Sprintf("%x", sw.sha256.Sum(nil))
-	sw.p.Printf("%s%sDownloaded %s %v bytes (%v KB/s) sha256 %s\n", EraseLine, SOL, dst, number.Decimal(sw.total), sw.format(kbps), hash)
+	sw.p.Printf("%s%sDownloaded %s to %s %v bytes (%v KB/s) sha256 %s\n", EraseLine, SOL, src, dst, number.Decimal(sw.total), sw.format(kbps), hash)
 
 	expected := String(artifact.Application.Sha256)
 	if expected == "" {
