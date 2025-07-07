@@ -8,7 +8,20 @@ import (
 	"net/url"
 	"os"
 	"time"
+	"github.com/tadhunt/logger"
 )
+
+type Logger struct {
+	log logger.CompatLogWriter
+}
+
+func (l *Logger) Infof(format string, args ...interface{}) {
+	l.log.Infof(format, args)
+}
+
+func (l *Logger) Errorf(format string, args ...interface{}) {
+	l.log.Errorf(format, args)
+}
 
 func Download(serverURL *url.URL, project string, version string, build string, artifact *Artifact, dstdir string, replace bool, quiet bool) error {
 	if artifact == nil || artifact.Application == nil || artifact.Application.Name == nil {
@@ -38,7 +51,15 @@ func Download(serverURL *url.URL, project string, version string, build string, 
 
 	sw := NewStatusWriter(msg, quiet)
 
-	err = dlstream.DownloadStream(context.Background(), src, dst, sw)
+	log := logger.NewCompatLogWriter(logger.LogLevel_DEBUG)
+
+	l := &Logger{
+		log: log,
+	}
+	options := dlstream.DefaultOptions()
+	options.Logger = l
+
+	err = dlstream.DownloadStreamOpts(context.Background(), src, dst, sw, options)
 	if err != nil {
 		return err
 	}
