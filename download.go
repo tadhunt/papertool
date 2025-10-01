@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"golang.org/x/text/number"
-	"gopkg.in/vansante/go-dl-stream.v2"
+	"github.com/tadhunt/go-dl-stream/v2"
 	"net/url"
 	"os"
 	"time"
