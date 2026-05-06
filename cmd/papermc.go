@@ -28,7 +28,7 @@ func main() {
 	flaggy.DefaultParser.AdditionalHelpPrepend = "https://github.com/tadhunt/papertool"
 	flaggy.SetVersion(MainSemanticVersion)
 
-	server := "https://api.papermc.io"
+	server := "https://fill.papermc.io"
 	flaggy.String(&server, "", "server", "[required] URL of papermc.io server to interact with")
 	flaggy.Bool(&quiet, "", "quiet", "[optional] don't print extra info")
 	flaggy.String(&paperProject, "", "project", "[required] Paper project to fetch data from")

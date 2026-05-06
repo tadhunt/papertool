@@ -6,116 +6,56 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
+	"strings"
 )
 
 /*
- * PROJECT is one of "paper", "velocity", or "waterfall"
- */
-
-/*
- * Fetch project release channels
- *	GET https://api.papermc.io/v2/projects/${PROJECT}
+ * PROJECT is one of "paper", "velocity", or "waterfall".
  *
- * Response:
- * {
- *     "project_id": "velocity",
- *     "project_name": "Velocity",
- *     "version_groups": [
- *         "1.0.0",
- *         "1.1.0",
- *         "3.0.0"
- *     ],
- *     "versions": [											<-- These are release channels
- *         "1.0.10",
- *         "1.1.9",
- *         "3.1.0",
- *         "3.1.1",
- *         "3.1.1-SNAPSHOT",
- *         "3.1.2-SNAPSHOT",
- *         "3.2.0-SNAPSHOT"
- *     ]
- * }
- */
-
-/*
- * Fetch builds for the given ${PROJECT} and ${VERSION}
- *	GET https://api.papermc.io/v2/projects/${PROJECT}/versions/${VERSION}/builds
+ * As of 2026, papermc.io migrated from the v2 API on api.papermc.io to the
+ * v3 "Fill" API on fill.papermc.io. v2 is no longer being updated for new
+ * release lines (e.g. velocity 3.5.0-SNAPSHOT only shows up on v3). This
+ * package now talks to v3 and translates the responses into the legacy
+ * shape so existing callers keep working.
  *
- * For example:
- *	GET https://api.papermc.io/v2/projects/velocity/versions/3.2.0-SNAPSHOT/builds
  *
- * Response:
- * {
- *     "project_id": "velocity",
- *     "project_name": "Velocity",
- *     "version": "3.2.0-SNAPSHOT",
- *     "builds": [
- *         {
- *             "build": 214,
- *             "time": "2023-01-02T02:52:34.092Z",
- *             "channel": "default",
- *             "promoted": false,
- *             "changes": [
- *                 {
- *                     "commit": "1bfeac58b6069a061326d3ced1940e3ccf5feb18",
- *                     "summary": "all, not just sub",
- *                     "message": "all, not just sub\n"
- *                 }
- *             ],
- *             "downloads": {
- *                 "application": {
- *                     "name": "velocity-3.2.0-SNAPSHOT-214.jar",					<-- ARTIFACT
- *                     "sha256": "1bf681f954bc4d68a3b395c1eb360a933500f8fd960679bf40e8d05af16e8483"
- *                 }
- *             }
- *         },
- * 	[...]
- */
-
-/*
- * Fetch a specific build for the given ${PROJECT} and ${VERSION}
- *	GET https://api.papermc.io/v2/projects/${PROJECT}/versions/${VERSION}/builds/${BUILD}
+ * v3 endpoints:
  *
- * For example:
- *	GET https://api.papermc.io/v2/projects/velocity/versions/3.2.0-SNAPSHOT/builds
+ *   GET https://fill.papermc.io/v3/projects/${PROJECT}
+ *   {
+ *     "project":  { "id": "velocity", "name": "Velocity" },
+ *     "versions": { "3.0.0": ["3.5.0-SNAPSHOT", "3.4.0", ...], ... }
+ *   }
  *
- * Response:
- * {
- *     "project_id": "velocity",
- *     "project_name": "Velocity",
- *     "version": "3.2.0-SNAPSHOT",
- *     "builds": [
- *         {
- *             "build": 214,
- *             "time": "2023-01-02T02:52:34.092Z",
- *             "channel": "default",
- *             "promoted": false,
- *             "changes": [
- *                 {
- *                     "commit": "1bfeac58b6069a061326d3ced1940e3ccf5feb18",
- *                     "summary": "all, not just sub",
- *                     "message": "all, not just sub\n"
- *                 }
- *             ],
- *             "downloads": {
- *                 "application": {
- *                     "name": "velocity-3.2.0-SNAPSHOT-214.jar",					<-- ARTIFACT
- *                     "sha256": "1bf681f954bc4d68a3b395c1eb360a933500f8fd960679bf40e8d05af16e8483"
- *                 }
- *             }
- *         },
- * 	[...]
- */
-
-/*
- * Download a build artifact
- *	GET https://api.papermc.io/v2/projects/${PROJECT}/versions/${VERSION}/builds/${BUILD}/downloads/${ARTIFACT}
+ *   GET https://fill.papermc.io/v3/projects/${PROJECT}/versions/${VERSION}/builds
+ *   [
+ *     {
+ *       "id": 594,
+ *       "time": "2026-05-01T18:17:18.376Z",
+ *       "channel": "STABLE",
+ *       "commits": [{ "sha": "...", "time": "...", "message": "..." }, ...],
+ *       "downloads": {
+ *         "server:default": {
+ *           "name": "velocity-3.5.0-SNAPSHOT-594.jar",
+ *           "checksums": { "sha256": "..." },
+ *           "size": 18881365,
+ *           "url":  "https://fill-data.papermc.io/v1/objects/.../velocity-3.5.0-SNAPSHOT-594.jar"
+ *         }
+ *       }
+ *     },
+ *     ...
+ *   ]
  *
- * For example:
- *	GET https://api.papermc.io/v2/projects/velocity/versions/3.2.0-SNAPSHOT/builds/261/downloads/velocity-3.2.0-SNAPSHOT-261.jar
+ *   GET https://fill.papermc.io/v3/projects/${PROJECT}/versions/${VERSION}/builds/${BUILD}
+ *   (single build object, same shape as one element of the array above)
  *
- * Response:
- *	The requested file
+ *
+ * Legacy ordering note: the v2 versions and builds responses were
+ * oldest-first. v3 returns versions per group newest-first within each
+ * group, and builds newest-first. We reverse on translation so callers
+ * that pick `Versions[len-1]` / `Builds[len-1]` for "latest" still work.
  */
 
 const (
@@ -123,6 +63,8 @@ const (
 	Project_Velocity  = "velocity"
 	Project_Waterfall = "waterfall"
 )
+
+// --- Public types (kept stable across the v2 → v3 transition). ---
 
 type Versions struct {
 	ProjectID     *string  `json:"project_id"`
@@ -165,6 +107,10 @@ type Artifact struct {
 type Application struct {
 	Name   *string `json:"name"`
 	Sha256 *string `json:"sha256"`
+	// URL is the direct download URL provided by the v3 API. Set by the
+	// translation layer; empty for callers that constructed an Artifact
+	// some other way.
+	URL *string `json:"url,omitempty"`
 }
 
 type MetadataSyntaxError struct {
@@ -177,40 +123,205 @@ func (e *MetadataSyntaxError) Error() string {
 	return e.msg
 }
 
-func GetVersions(src *url.URL, project string) (versions *Versions, err error) {
-	u := fmt.Sprintf("%s/v2/projects/%s", src.String(), project)
+// --- v3 raw response shapes (private). ---
 
-	versions = &Versions{}
-	versions.raw, err = fetch(u, versions)
-	return
+type v3Project struct {
+	Project struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"project"`
+	Versions map[string][]string `json:"versions"`
 }
 
-func GetBuilds(src *url.URL, project string, version string) (builds *Builds, err error) {
-	u := fmt.Sprintf("%s/v2/projects/%s/versions/%s/builds", src.String(), project, version)
+type v3Build struct {
+	ID        json.Number             `json:"id"`
+	Time      string                  `json:"time"`
+	Channel   string                  `json:"channel"`
+	Commits   []v3Commit              `json:"commits"`
+	Downloads map[string]v3Download   `json:"downloads"`
+}
 
-	builds = &Builds{}
-	builds.raw, err = fetch(u, builds)
+type v3Commit struct {
+	Sha     string `json:"sha"`
+	Time    string `json:"time"`
+	Message string `json:"message"`
+}
+
+type v3Download struct {
+	Name      string `json:"name"`
+	Checksums struct {
+		Sha256 string `json:"sha256"`
+	} `json:"checksums"`
+	Size int64  `json:"size"`
+	URL  string `json:"url"`
+}
+
+// --- Public fetchers (now hitting v3). ---
+
+func GetVersions(src *url.URL, project string) (*Versions, error) {
+	u := fmt.Sprintf("%s/v3/projects/%s", src.String(), project)
+
+	v3 := &v3Project{}
+	raw, err := fetch(u, v3)
 	if err != nil {
-		return
+		return nil, err
 	}
 
-	//
-	// these fields are populated when fetching a specific build, but not when fetching all builds
-	//
-	for _, build := range builds.Builds {
-		build.ProjectID = builds.ProjectID
-		build.ProjectName = builds.ProjectName
+	pid := v3.Project.ID
+	pname := v3.Project.Name
+	versions := &Versions{
+		ProjectID:   &pid,
+		ProjectName: &pname,
+		raw:         raw,
 	}
 
-	return
+	groups := make([]string, 0, len(v3.Versions))
+	for g := range v3.Versions {
+		groups = append(groups, g)
+	}
+	sort.Slice(groups, func(i, j int) bool { return semverLess(groups[i], groups[j]) })
+	versions.VersionGroups = groups
+
+	for _, g := range groups {
+		gv := v3.Versions[g]
+		// v3 lists versions newest-first within each group; reverse so the
+		// flattened list is oldest-first (newest at len-1), matching v2.
+		for i := len(gv) - 1; i >= 0; i-- {
+			versions.Versions = append(versions.Versions, gv[i])
+		}
+	}
+
+	return versions, nil
 }
 
-func GetBuild(src *url.URL, project string, version string, build string) (b *Build, err error) {
-	u := fmt.Sprintf("%s/v2/projects/%s/versions/%s/builds/%s", src.String(), project, version, build)
+func GetBuilds(src *url.URL, project string, version string) (*Builds, error) {
+	u := fmt.Sprintf("%s/v3/projects/%s/versions/%s/builds", src.String(), project, version)
 
-	b = &Build{}
-	b.raw, err = fetch(u, b)
-	return
+	var v3Builds []v3Build
+	raw, err := fetch(u, &v3Builds)
+	if err != nil {
+		return nil, err
+	}
+
+	pid := project
+	ver := version
+	builds := &Builds{
+		ProjectID: &pid,
+		Version:   &ver,
+		raw:       raw,
+	}
+
+	// v3 returns newest-first; reverse for oldest-first / newest-last.
+	for i := len(v3Builds) - 1; i >= 0; i-- {
+		b, err := v3BuildToLegacy(&v3Builds[i])
+		if err != nil {
+			return nil, err
+		}
+		b.ProjectID = builds.ProjectID
+		builds.Builds = append(builds.Builds, b)
+	}
+
+	return builds, nil
+}
+
+func GetBuild(src *url.URL, project string, version string, build string) (*Build, error) {
+	u := fmt.Sprintf("%s/v3/projects/%s/versions/%s/builds/%s", src.String(), project, version, build)
+
+	v3 := &v3Build{}
+	raw, err := fetch(u, v3)
+	if err != nil {
+		return nil, err
+	}
+
+	b, err := v3BuildToLegacy(v3)
+	if err != nil {
+		return nil, err
+	}
+	pid := project
+	b.ProjectID = &pid
+	b.raw = raw
+	return b, nil
+}
+
+// v3BuildToLegacy translates a v3 build record into the legacy v2-shaped
+// Build. The "server:default" download is preferred; if absent, any other
+// download key starting with "server:" is used.
+func v3BuildToLegacy(v3 *v3Build) (*Build, error) {
+	id, err := v3.ID.Float64()
+	if err != nil {
+		return nil, fmt.Errorf("parse build id %q: %w", v3.ID.String(), err)
+	}
+	t := v3.Time
+	ch := v3.Channel
+	b := &Build{
+		Build:   &id,
+		Time:    &t,
+		Channel: &ch,
+	}
+	for _, c := range v3.Commits {
+		sha := c.Sha
+		// v3 doesn't separate summary from message; populate both with
+		// message so callers checking either field still see content.
+		msg := c.Message
+		b.Changes = append(b.Changes, &Change{
+			Commit:  &sha,
+			Summary: &msg,
+			Message: &msg,
+		})
+	}
+
+	var dl *v3Download
+	if d, ok := v3.Downloads["server:default"]; ok {
+		dl = &d
+	} else {
+		// Stable fallback: pick whichever "server:*" key sorts first so
+		// the result is deterministic across runs.
+		keys := make([]string, 0, len(v3.Downloads))
+		for k := range v3.Downloads {
+			if strings.HasPrefix(k, "server:") {
+				keys = append(keys, k)
+			}
+		}
+		sort.Strings(keys)
+		if len(keys) > 0 {
+			d := v3.Downloads[keys[0]]
+			dl = &d
+		}
+	}
+
+	if dl != nil {
+		name := dl.Name
+		sha := dl.Checksums.Sha256
+		dlurl := dl.URL
+		b.Artifact = &Artifact{
+			Application: &Application{
+				Name:   &name,
+				Sha256: &sha,
+				URL:    &dlurl,
+			},
+		}
+	}
+
+	return b, nil
+}
+
+// semverLess compares dotted-numeric version-group keys (e.g. "1.0.0" vs
+// "3.0.0"). Non-numeric segments compare lexicographically as a fallback.
+func semverLess(a, b string) bool {
+	aParts := strings.Split(a, ".")
+	bParts := strings.Split(b, ".")
+	n := len(aParts)
+	if len(bParts) < n {
+		n = len(bParts)
+	}
+	for i := 0; i < n; i++ {
+		ai, _ := strconv.Atoi(aParts[i])
+		bi, _ := strconv.Atoi(bParts[i])
+		if ai != bi {
+			return ai < bi
+		}
+	}
+	return len(aParts) < len(bParts)
 }
 
 func fetch(src string, result any) ([]byte, error) {
@@ -218,10 +329,15 @@ func fetch(src string, result any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
+	}
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("%s: status %d: %s", src, response.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	err = unmarshal(body, result)

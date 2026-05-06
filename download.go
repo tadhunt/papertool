@@ -28,7 +28,13 @@ func Download(serverURL *url.URL, project string, version string, build string, 
 		return fmt.Errorf("bad artifact")
 	}
 
-	src := fmt.Sprintf("%s/v2/projects/%s/versions/%s/builds/%s/downloads/%s", serverURL.String(), project, version, build, String(artifact.Application.Name))
+	// v3 builds expose a direct CDN URL on the artifact; prefer it. Fall
+	// back to the legacy v2 path for any caller still constructing
+	// Artifacts by hand.
+	src := String(artifact.Application.URL)
+	if src == "" {
+		src = fmt.Sprintf("%s/v2/projects/%s/versions/%s/builds/%s/downloads/%s", serverURL.String(), project, version, build, String(artifact.Application.Name))
+	}
 	dst := fmt.Sprintf("%s/%s", dstdir, String(artifact.Application.Name))
 
 	_, err := os.Stat(dst)
